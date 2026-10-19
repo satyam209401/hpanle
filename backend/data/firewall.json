@@ -1,0 +1,30 @@
+[
+  {
+    "id": "1",
+    "port": "22",
+    "proto": "tcp",
+    "action": "ALLOW",
+    "comment": "SSH Management"
+  },
+  {
+    "id": "2",
+    "port": "80",
+    "proto": "tcp",
+    "action": "ALLOW",
+    "comment": "HTTP Web Traffic"
+  },
+  {
+    "id": "3",
+    "port": "443",
+    "proto": "tcp",
+    "action": "ALLOW",
+    "comment": "HTTPS Secure Web"
+  },
+  {
+    "id": "4",
+    "port": "5000",
+    "proto": "tcp",
+    "action": "ALLOW",
+    "comment": "hPanel Daemon API"
+  }
+]

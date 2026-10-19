@@ -1,0 +1,13 @@
+{
+  "name": "hpanel-suite",
+  "version": "1.0.0",
+  "description": "aaPanel / hPanel clone for Linux VPS management with React & Node.js",
+  "scripts": {
+    "server": "cd backend && npm run dev",
+    "client": "cd frontend && npm run dev",
+    "install:all": "cd backend && npm install && cd ../frontend && npm install"
+  },
+  "keywords": ["vps", "control-panel", "aapanel", "hpanel", "react", "nginx", "docker"],
+  "author": "",
+  "license": "MIT"
+}
