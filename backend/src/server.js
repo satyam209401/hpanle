@@ -162,17 +162,56 @@ const MONITORED_SERVICES = [
 ];
 
 app.get('/api/services', async (req, res) => {
+// Helper functions to check real package and service status on Linux
+function checkBinaryExists(bin) {
+  return new Promise((resolve) => {
+    if (!IS_LINUX) {
+      resolve(bin === 'node' || bin === 'npm');
+      return;
+    }
+    exec(`which ${bin}`, (err, stdout) => {
+      resolve(!err && stdout && stdout.trim().length > 0);
+    });
+  });
+}
+
+function checkServiceActive(serviceName) {
+  return new Promise((resolve) => {
+    if (!IS_LINUX) {
+      resolve(true);
+      return;
+    }
+    exec(`systemctl is-active ${serviceName}`, (err, stdout) => {
+      resolve(stdout && stdout.trim() === 'active');
+    });
+  });
+}
+
+app.get('/api/services', async (req, res) => {
   try {
-    // If on Linux, can check systemctl status. Otherwise simulate healthy state for demo/dev
-    const services = MONITORED_SERVICES.map(svc => ({
-      ...svc,
-      status: 'active',
-      running: true,
-      uptime: '14 days, 6 hours',
-      cpuUsage: Math.floor(Math.random() * 3) + 0.5,
-      memUsage: `${Math.floor(Math.random() * 80) + 40} MB`
-    }));
-    res.json({ success: true, data: services });
+    const serviceChecks = await Promise.all(
+      MONITORED_SERVICES.map(async (svc) => {
+        let isRunning = false;
+        if (svc.id === 'nginx') isRunning = await checkServiceActive('nginx');
+        else if (svc.id === 'mysql') isRunning = await checkServiceActive('mysql') || await checkServiceActive('mariadb');
+        else if (svc.id === 'docker') isRunning = await checkServiceActive('docker');
+        else if (svc.id === 'pm2') isRunning = await checkBinaryExists('pm2');
+        else if (svc.id === 'redis') isRunning = await checkServiceActive('redis-server') || await checkServiceActive('redis');
+        else if (svc.id === 'ufw') isRunning = await checkServiceActive('ufw');
+        else if (svc.id === 'ssh') isRunning = await checkServiceActive('ssh') || await checkServiceActive('sshd');
+        else isRunning = !IS_LINUX;
+
+        return {
+          ...svc,
+          status: isRunning ? 'active' : 'inactive',
+          running: isRunning,
+          uptime: isRunning ? 'Active (Systemd)' : 'Stopped',
+          cpuUsage: isRunning ? (Math.floor(Math.random() * 2) + 0.5) : 0,
+          memUsage: isRunning ? `${Math.floor(Math.random() * 40) + 20} MB` : '0 MB'
+        };
+      })
+    );
+    res.json({ success: true, data: serviceChecks });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -610,8 +649,63 @@ const DEFAULT_PACKAGES = [
 
 let appStorePackages = readJsonFile(PACKAGES_FILE, DEFAULT_PACKAGES);
 
-app.get('/api/appstore/packages', (req, res) => {
-  res.json({ success: true, data: appStorePackages });
+// Dynamically check actual binary presence on Linux VPS
+async function checkPackageInstalled(pkgId) {
+  if (!IS_LINUX) {
+    // In dev mode on Windows
+    return ['nodejs20', 'nginx'].includes(pkgId);
+  }
+  try {
+    switch (pkgId) {
+      case 'php82':
+      case 'php83':
+        return await checkBinaryExists('php');
+      case 'nodejs20':
+        return await checkBinaryExists('node');
+      case 'mysql8':
+        return await checkBinaryExists('mysql') || await checkServiceActive('mysql') || await checkServiceActive('mariadb');
+      case 'nginx':
+        return await checkBinaryExists('nginx');
+      case 'docker':
+        return await checkBinaryExists('docker');
+      case 'pm2':
+        return await checkBinaryExists('pm2');
+      case 'redis':
+        return await checkBinaryExists('redis-server') || await checkBinaryExists('redis-cli');
+      case 'python311':
+        return await checkBinaryExists('python3');
+      case 'composer':
+        return await checkBinaryExists('composer');
+      case 'certbot':
+        return await checkBinaryExists('certbot');
+      case 'phpmyadmin':
+        return fs.existsSync('/usr/share/phpmyadmin') || fs.existsSync('/var/www/phpmyadmin');
+      case 'adminer':
+        return fs.existsSync('/var/www/adminer/index.php');
+      default:
+        return false;
+    }
+  } catch (e) {
+    return false;
+  }
+}
+
+app.get('/api/appstore/packages', async (req, res) => {
+  try {
+    const verifiedPackages = await Promise.all(
+      appStorePackages.map(async (pkg) => {
+        if (pkg.status === 'installing') return pkg;
+        const isInstalled = await checkPackageInstalled(pkg.id);
+        return {
+          ...pkg,
+          status: isInstalled ? 'installed' : 'not_installed'
+        };
+      })
+    );
+    res.json({ success: true, data: verifiedPackages });
+  } catch (err) {
+    res.json({ success: true, data: appStorePackages });
+  }
 });
 
 app.post('/api/appstore/install', (req, res) => {
@@ -625,30 +719,58 @@ app.post('/api/appstore/install', (req, res) => {
   pkg.status = 'installing';
   writeJsonFile(PACKAGES_FILE, appStorePackages);
 
-  // Send progressive install logs over Socket.io
-  const logs = [
-    `[hPanel AppStore] Initiating installation for ${pkg.name} (${pkg.version})...`,
-    `[hPanel AppStore] Checking dependencies & architecture: ${process.arch}...`,
-    `[hPanel AppStore] Executing: ${pkg.installCmd}`,
-    `[hPanel AppStore] Fetching packages from repository mirror...`,
-    `[hPanel AppStore] Unpacking binaries and setting service units...`,
-    `[hPanel AppStore] Configuring systemd daemons and ports: ${pkg.port}...`,
-    `[hPanel AppStore] Verifying service health check... PASS`,
-    `🎉 [hPanel AppStore] ${pkg.name} installed successfully!`
-  ];
+  if (IS_LINUX) {
+    io.emit('appstore:log', { packageId, text: `[hPanel] Launching real installation on Linux VPS...` });
+    io.emit('appstore:log', { packageId, text: `[hPanel] Running: ${pkg.installCmd}` });
 
-  let logIndex = 0;
-  const interval = setInterval(() => {
-    if (logIndex < logs.length) {
-      io.emit('appstore:log', { packageId, text: logs[logIndex] });
-      logIndex++;
-    } else {
-      clearInterval(interval);
-      pkg.status = 'installed';
+    const child = spawn(pkg.installCmd, [], { shell: true });
+
+    child.stdout.on('data', (data) => {
+      const lines = data.toString().split('\n');
+      lines.forEach(l => {
+        if (l.trim()) io.emit('appstore:log', { packageId, text: l.trim() });
+      });
+    });
+
+    child.stderr.on('data', (data) => {
+      const lines = data.toString().split('\n');
+      lines.forEach(l => {
+        if (l.trim()) io.emit('appstore:log', { packageId, text: l.trim() });
+      });
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        pkg.status = 'installed';
+        io.emit('appstore:log', { packageId, text: `🎉 [hPanel] ${pkg.name} installed and configured successfully!` });
+        io.emit('appstore:complete', { packageId, success: true, package: pkg });
+      } else {
+        pkg.status = 'not_installed';
+        io.emit('appstore:log', { packageId, text: `❌ [hPanel] Installation failed with exit code ${code}` });
+        io.emit('appstore:complete', { packageId, success: false });
+      }
       writeJsonFile(PACKAGES_FILE, appStorePackages);
-      io.emit('appstore:complete', { packageId, success: true, package: pkg });
-    }
-  }, 450);
+    });
+  } else {
+    // Windows/Local dev simulation
+    const logs = [
+      `[hPanel AppStore] Simulating installation of ${pkg.name} (${pkg.version})...`,
+      `[hPanel AppStore] Fetching packages: ${pkg.installCmd}`,
+      `[hPanel AppStore] Unpacking binaries and setting service units...`,
+      `🎉 [hPanel AppStore] ${pkg.name} installed successfully!`
+    ];
+    let logIndex = 0;
+    const interval = setInterval(() => {
+      if (logIndex < logs.length) {
+        io.emit('appstore:log', { packageId, text: logs[logIndex++] });
+      } else {
+        clearInterval(interval);
+        pkg.status = 'installed';
+        writeJsonFile(PACKAGES_FILE, appStorePackages);
+        io.emit('appstore:complete', { packageId, success: true, package: pkg });
+      }
+    }, 450);
+  }
 
   res.json({ success: true, message: `Installation of ${pkg.name} started in background.` });
 });
