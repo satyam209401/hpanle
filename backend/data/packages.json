@@ -10,7 +10,7 @@
     "status": "installed",
     "port": "9000 (Socket)",
     "officialUrl": "https://www.php.net",
-    "installCmd": "sudo apt-get install -y php8.2-fpm php8.2-mysql php8.2-curl php8.2-gd php8.2-mbstring php8.2-xml"
+    "installCmd": "apt-get update && (which add-apt-repository >/dev/null 2>&1 || apt-get install -y software-properties-common) && (add-apt-repository -y ppa:ondrej/php 2>&1 || true) && apt-get update && (apt-get install -y php8.2-fpm php8.2-mysql php8.2-curl php8.2-gd php8.2-mbstring php8.2-xml 2>&1 || apt-get install -y php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-cli 2>&1)"
   },
   {
     "id": "php83",
@@ -20,10 +20,10 @@
     "icon": "Code2",
     "author": "PHP Group",
     "description": "Latest stable PHP release with deep-cloning read-only properties, typed class constants, and JIT.",
-    "status": "installed",
+    "status": "not_installed",
     "port": "9083 (Socket)",
     "officialUrl": "https://www.php.net",
-    "installCmd": "sudo apt-get install -y php8.3-fpm php8.3-mysql php8.3-curl php8.3-gd php8.3-mbstring php8.3-xml"
+    "installCmd": "apt-get update && (which add-apt-repository >/dev/null 2>&1 || apt-get install -y software-properties-common) && (add-apt-repository -y ppa:ondrej/php 2>&1 || true) && apt-get update && (apt-get install -y php8.3-fpm php8.3-mysql php8.3-curl php8.3-gd php8.3-mbstring php8.3-xml 2>&1 || apt-get install -y php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-cli 2>&1)"
   },
   {
     "id": "nodejs20",

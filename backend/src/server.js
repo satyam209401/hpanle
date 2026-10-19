@@ -816,10 +816,15 @@ app.get('/api/appstore/packages', async (req, res) => {
 
 app.post('/api/appstore/install', (req, res) => {
   const { packageId } = req.body;
-  const pkg = appStorePackages.find(p => p.id === packageId);
+  const pkg = appStorePackages.find(p => p.id === packageId) || DEFAULT_PACKAGES.find(p => p.id === packageId);
   if (!pkg) {
     return res.status(404).json({ success: false, error: 'Package not found' });
   }
+
+  // Always use the latest install command from DEFAULT_PACKAGES
+  const defaultPkg = DEFAULT_PACKAGES.find(p => p.id === packageId);
+  const commandToRun = defaultPkg?.installCmd || pkg.installCmd;
+  pkg.installCmd = commandToRun;
 
   // Update status to installing
   pkg.status = 'installing';
@@ -827,9 +832,9 @@ app.post('/api/appstore/install', (req, res) => {
 
   if (IS_LINUX) {
     io.emit('appstore:log', { packageId, text: `[hPanel] Launching real installation on Linux VPS...` });
-    io.emit('appstore:log', { packageId, text: `[hPanel] Running: ${pkg.installCmd}` });
+    io.emit('appstore:log', { packageId, text: `[hPanel] Running: ${commandToRun}` });
 
-    const child = spawn(pkg.installCmd, [], { 
+    const child = spawn(commandToRun, [], { 
       shell: true,
       env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive', PATH: process.env.PATH + ':/usr/local/bin:/usr/sbin:/sbin' }
     });
