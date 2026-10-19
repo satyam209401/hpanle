@@ -51,28 +51,8 @@ function writeJsonFile(filePath, data) {
   }
 }
 
-// Initial mock data if not existing
-let sites = readJsonFile(SITES_FILE, [
-  {
-    id: 'site-1',
-    domain: 'api.example.com',
-    type: 'Node.js Proxy',
-    targetPort: 3000,
-    rootPath: '/var/www/api.example.com',
-    ssl: true,
-    status: 'running',
-    createdAt: '2026-10-15'
-  },
-  {
-    id: 'site-2',
-    domain: 'myblog.org',
-    type: 'Static / HTML',
-    rootPath: '/var/www/myblog.org',
-    ssl: true,
-    status: 'running',
-    createdAt: '2026-10-18'
-  }
-]);
+// Sites database
+let sites = readJsonFile(SITES_FILE, []);
 
 let firewallRules = readJsonFile(FIREWALL_FILE, [
   { id: '1', port: '22', proto: 'tcp', action: 'ALLOW', comment: 'SSH Management' },
