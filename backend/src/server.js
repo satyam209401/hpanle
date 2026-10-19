@@ -161,7 +161,6 @@ const MONITORED_SERVICES = [
   { id: 'ssh', name: 'OpenSSH Server', category: 'security', port: '22', description: 'Secure remote shell service' }
 ];
 
-app.get('/api/services', async (req, res) => {
 // Helper functions to check real package and service status on Linux
 function checkBinaryExists(bin) {
   return new Promise((resolve) => {
