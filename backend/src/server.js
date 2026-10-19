@@ -486,7 +486,7 @@ const DEFAULT_PACKAGES = [
     status: 'installed',
     port: '9000 (Socket)',
     officialUrl: 'https://www.php.net',
-    installCmd: 'sudo apt-get install -y php8.2-fpm php8.2-mysql php8.2-curl php8.2-gd php8.2-mbstring php8.2-xml'
+    installCmd: 'export DEBIAN_FRONTEND=noninteractive; (which add-apt-repository >/dev/null 2>&1 || apt-get install -y software-properties-common) && add-apt-repository -y ppa:ondrej/php && apt-get update && apt-get install -y php8.2-fpm php8.2-mysql php8.2-curl php8.2-gd php8.2-mbstring php8.2-xml || apt-get install -y php-fpm php-mysql php-curl php-gd php-mbstring php-xml'
   },
   {
     id: 'php83',
@@ -499,7 +499,7 @@ const DEFAULT_PACKAGES = [
     status: 'not_installed',
     port: '9083 (Socket)',
     officialUrl: 'https://www.php.net',
-    installCmd: 'sudo apt-get install -y php8.3-fpm php8.3-mysql php8.3-curl php8.3-gd php8.3-mbstring php8.3-xml'
+    installCmd: 'export DEBIAN_FRONTEND=noninteractive; (which add-apt-repository >/dev/null 2>&1 || apt-get install -y software-properties-common) && add-apt-repository -y ppa:ondrej/php && apt-get update && apt-get install -y php8.3-fpm php8.3-mysql php8.3-curl php8.3-gd php8.3-mbstring php8.3-xml || apt-get install -y php-fpm php-mysql php-curl php-gd php-mbstring php-xml'
   },
   {
     id: 'nodejs20',
@@ -525,7 +525,7 @@ const DEFAULT_PACKAGES = [
     status: 'installed',
     port: '8888',
     officialUrl: 'https://www.phpmyadmin.net',
-    installCmd: 'sudo apt-get install -y phpmyadmin || docker run -d --name phpmyadmin -p 8888:80 phpmyadmin/phpmyadmin'
+    installCmd: 'mkdir -p /var/www/phpmyadmin && cd /var/www/phpmyadmin && curl -sSL https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.tar.gz | tar -xz --strip-components=1 && chmod -R 755 /var/www/phpmyadmin'
   },
   {
     id: 'mysql8',
@@ -722,7 +722,10 @@ app.post('/api/appstore/install', (req, res) => {
     io.emit('appstore:log', { packageId, text: `[hPanel] Launching real installation on Linux VPS...` });
     io.emit('appstore:log', { packageId, text: `[hPanel] Running: ${pkg.installCmd}` });
 
-    const child = spawn(pkg.installCmd, [], { shell: true });
+    const child = spawn(pkg.installCmd, [], { 
+      shell: true,
+      env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive', PATH: process.env.PATH + ':/usr/local/bin:/usr/sbin:/sbin' }
+    });
 
     child.stdout.on('data', (data) => {
       const lines = data.toString().split('\n');

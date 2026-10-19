@@ -32,7 +32,7 @@ export default function AppStoreView() {
   const [installingPkg, setInstallingPkg] = useState(null);
   const [installLogs, setInstallLogs] = useState([]);
   const [showLogModal, setShowLogModal] = useState(false);
-  const logEndRef = useRef(null);
+  const logContainerRef = useRef(null);
 
   const fetchPackages = async () => {
     try {
@@ -49,16 +49,21 @@ export default function AppStoreView() {
     fetchPackages();
 
     const handleLog = (data) => {
-      setInstallLogs((prev) => [...prev, data.text]);
+      setInstallLogs((prev) => {
+        const next = [...prev, data.text];
+        return next.length > 200 ? next.slice(-200) : next;
+      });
     };
 
     const handleComplete = (data) => {
       setInstallingPkg(null);
-      confetti({
-        particleCount: 80,
-        spread: 80,
-        origin: { y: 0.6 }
-      });
+      if (data.success) {
+        confetti({
+          particleCount: 80,
+          spread: 80,
+          origin: { y: 0.6 }
+        });
+      }
       fetchPackages();
     };
 
@@ -71,8 +76,11 @@ export default function AppStoreView() {
     };
   }, []);
 
+  // High performance instant scroll without main-thread animation locking
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
   }, [installLogs]);
 
   const handleInstall = async (pkg) => {
@@ -292,58 +300,107 @@ export default function AppStoreView() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4"
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-md p-4"
           >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0, y: 15 }}
+              initial={{ scale: 0.95, opacity: 0, y: 15 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 15 }}
+              exit={{ scale: 0.95, opacity: 0, y: 15 }}
               transition={{ type: 'spring', damping: 25, stiffness: 350 }}
-              className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col h-[520px]"
+              className="bg-slate-900 border border-slate-750 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col h-[580px]"
             >
+              {/* Progress bar animation while active */}
+              {installingPkg && (
+                <div className="h-1 bg-gradient-to-r from-indigo-500 via-cyan-400 to-indigo-500 animate-pulse w-full" />
+              )}
+
               {/* Modal Titlebar */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950">
-                <div className="flex items-center gap-2.5">
-                  <Terminal className="w-4 h-4 text-indigo-400" />
-                  <span className="text-sm font-bold text-white font-mono">
-                    Installing: {installingPkg?.name || 'Package'}
-                  </span>
-                  {installingPkg && (
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  )}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
+                    <Terminal className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-white font-mono">
+                        {installingPkg ? `Installing ${installingPkg.name}` : 'Package Execution Log'}
+                      </span>
+                      {installingPkg ? (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 flex items-center gap-1">
+                          <RotateCw className="w-2.5 h-2.5 animate-spin" />
+                          Live Daemon
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                          Idle
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] text-slate-400 font-sans">
+                      Standard output & error streams from Linux apt/package manager
+                    </span>
+                  </div>
                 </div>
+
                 <button
                   onClick={() => setShowLogModal(false)}
-                  className="text-slate-400 hover:text-white"
+                  className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-750 text-slate-400 hover:text-white transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              {/* Live Terminal Log Stream */}
-              <div className="flex-1 p-5 bg-slate-950 font-mono text-xs text-indigo-200 overflow-y-auto space-y-1.5 select-text">
-                {installLogs.map((log, idx) => (
-                  <div key={idx} className="flex items-start gap-2 leading-relaxed">
-                    <span className="text-slate-600 select-none">&gt;</span>
-                    <span className={log.includes('🎉') ? 'text-emerald-400 font-bold' : log.includes('Executing') ? 'text-cyan-300' : 'text-slate-200'}>
-                      {log}
-                    </span>
-                  </div>
-                ))}
-                <div ref={logEndRef} />
+              {/* Live Terminal Log Stream (Zero-Lag Instant Scroll) */}
+              <div 
+                ref={logContainerRef}
+                className="flex-1 p-5 bg-slate-950 font-mono text-xs overflow-y-auto space-y-1 select-text scrollbar-thin"
+              >
+                {installLogs.map((log, idx) => {
+                  const isErr = log.includes('E:') || log.includes('error') || log.includes('failed') || log.includes('❌');
+                  const isSuccess = log.includes('🎉') || log.includes('PASS') || log.includes('successfully');
+                  const isCmd = log.includes('Running:') || log.includes('Executing');
+
+                  return (
+                    <div 
+                      key={idx} 
+                      className={`flex items-start gap-2.5 leading-relaxed py-0.5 px-2 rounded font-mono ${
+                        isErr 
+                          ? 'bg-rose-950/40 text-rose-300 border border-rose-900/50' 
+                          : isSuccess 
+                          ? 'bg-emerald-950/40 text-emerald-300 font-bold border border-emerald-900/50' 
+                          : isCmd
+                          ? 'text-cyan-300 font-semibold'
+                          : 'text-slate-300'
+                      }`}
+                    >
+                      <span className="text-slate-600 select-none">&gt;</span>
+                      <span className="break-all whitespace-pre-wrap">{log}</span>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Modal Footer */}
-              <div className="px-6 py-3.5 border-t border-slate-800 bg-slate-900/60 flex items-center justify-between">
-                <div className="text-xs text-slate-400 font-mono">
-                  {installingPkg ? 'Compiling & configuring daemon...' : 'Installation finished.'}
+              <div className="px-6 py-3.5 border-t border-slate-800 bg-slate-900/80 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  <span>{installingPkg ? 'Installation in progress (Safe to close window)...' : 'Task completed.'}</span>
                 </div>
-                <button
-                  onClick={() => setShowLogModal(false)}
-                  className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold"
-                >
-                  Done
-                </button>
+                
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setInstallLogs([])}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs font-medium transition-colors"
+                  >
+                    Clear Logs
+                  </button>
+                  <button
+                    onClick={() => setShowLogModal(false)}
+                    className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>

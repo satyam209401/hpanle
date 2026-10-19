@@ -20,7 +20,7 @@
     "icon": "Code2",
     "author": "PHP Group",
     "description": "Latest stable PHP release with deep-cloning read-only properties, typed class constants, and JIT.",
-    "status": "not_installed",
+    "status": "installed",
     "port": "9083 (Socket)",
     "officialUrl": "https://www.php.net",
     "installCmd": "sudo apt-get install -y php8.3-fpm php8.3-mysql php8.3-curl php8.3-gd php8.3-mbstring php8.3-xml"
