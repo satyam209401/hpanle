@@ -246,57 +246,179 @@ app.get('/api/sites', (req, res) => {
   res.json({ success: true, data: sites });
 });
 
+// Helper to generate default Nginx vhost configuration
+function generateVhostConfig(site) {
+  if (site.ssl) {
+    return `server {
+    listen 80;
+    listen [::]:80;
+    server_name ${site.domain};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${site.domain};
+
+    # SSL Certificates (managed by Let's Encrypt / Certbot)
+    ssl_certificate /etc/letsencrypt/live/${site.domain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${site.domain}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location / {
+        ${site.type === 'Node.js Proxy' 
+          ? `proxy_pass http://127.0.0.1:${site.targetPort};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;`
+          : `root ${site.rootPath};
+        index index.html index.htm;
+        try_files $uri $uri/ /index.html;`}
+    }
+}`;
+  }
+
+  return `server {
+    listen 80;
+    listen [::]:80;
+    server_name ${site.domain};
+
+    location / {
+        ${site.type === 'Node.js Proxy' 
+          ? `proxy_pass http://127.0.0.1:${site.targetPort};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;`
+          : `root ${site.rootPath};
+        index index.html index.htm;
+        try_files $uri $uri/ /index.html;`}
+    }
+}`;
+}
+
 app.post('/api/sites', (req, res) => {
   const { domain, type, targetPort, rootPath, ssl } = req.body;
   if (!domain) {
     return res.status(400).json({ success: false, error: 'Domain name is required' });
   }
 
+  const cleanDomain = domain.trim().toLowerCase();
+  const cleanRootPath = rootPath ? rootPath.trim() : (IS_LINUX ? `/var/www/${cleanDomain}` : path.join(__dirname, '..', 'storage', cleanDomain));
+
   const newSite = {
     id: `site-${Date.now()}`,
-    domain: domain.trim().toLowerCase(),
+    domain: cleanDomain,
     type: type || 'Node.js Proxy',
     targetPort: targetPort || 3000,
-    rootPath: rootPath || `/var/www/${domain.trim()}`,
+    rootPath: cleanRootPath,
     ssl: !!ssl,
     status: 'running',
     createdAt: new Date().toISOString().split('T')[0]
   };
 
-  sites.push(newSite);
-  writeJsonFile(SITES_FILE, sites);
+  newSite.nginxConfig = generateVhostConfig(newSite);
 
-  // If Linux, generate Nginx vhost config
+  // If on Linux, create directories and vhost
   if (IS_LINUX) {
-    const vhostConfig = `
-server {
-    listen 80;
-    server_name ${newSite.domain};
-
-    location / {
-        ${newSite.type === 'Node.js Proxy' 
-          ? `proxy_pass http://127.0.0.1:${newSite.targetPort};
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;`
-          : `root ${newSite.rootPath};
-        index index.html index.htm;
-        try_files $uri $uri/ /index.html;`}
-    }
-}
-`;
-    const confPath = `/etc/nginx/sites-available/${newSite.domain}.conf`;
     try {
-      fs.writeFileSync(confPath, vhostConfig);
-      exec(`ln -s ${confPath} /etc/nginx/sites-enabled/ && sudo nginx -s reload`);
+      exec(`mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled ${newSite.rootPath}`, () => {
+        const confPath = `/etc/nginx/sites-available/${newSite.domain}.conf`;
+        fs.writeFileSync(confPath, newSite.nginxConfig, 'utf8');
+
+        // Create default index.html if root empty
+        const defaultIndex = path.join(newSite.rootPath, 'index.html');
+        if (!fs.existsSync(defaultIndex)) {
+          fs.writeFileSync(defaultIndex, `<!DOCTYPE html><html><head><title>${newSite.domain}</title></head><body style="background:#0f172a;color:#fff;font-family:sans-serif;text-align:center;padding:50px"><h1>${newSite.domain} is Live on hPanel!</h1></body></html>`);
+        }
+
+        exec(`ln -sf ${confPath} /etc/nginx/sites-enabled/ && sudo nginx -t && sudo nginx -s reload`);
+      });
     } catch (e) {
-      console.warn('Nginx config write failed (check permissions):', e.message);
+      console.warn('Nginx setup warn:', e.message);
     }
   }
 
+  sites.push(newSite);
+  writeJsonFile(SITES_FILE, sites);
+
   res.status(201).json({ success: true, data: newSite });
+});
+
+// GET Nginx config for a site
+app.get('/api/sites/:id/config', (req, res) => {
+  const { id } = req.params;
+  const site = sites.find(s => s.id === id);
+  if (!site) return res.status(404).json({ success: false, error: 'Site not found' });
+
+  const confPath = IS_LINUX ? `/etc/nginx/sites-available/${site.domain}.conf` : null;
+  if (confPath && fs.existsSync(confPath)) {
+    try {
+      const liveConfig = fs.readFileSync(confPath, 'utf8');
+      return res.json({ success: true, config: liveConfig, path: confPath });
+    } catch (e) {}
+  }
+
+  res.json({ success: true, config: site.nginxConfig || generateVhostConfig(site), path: `/etc/nginx/sites-available/${site.domain}.conf` });
+});
+
+// SAVE and test Nginx config for a site
+app.post('/api/sites/:id/config', (req, res) => {
+  const { id } = req.params;
+  const { config } = req.body;
+  const site = sites.find(s => s.id === id);
+  if (!site) return res.status(404).json({ success: false, error: 'Site not found' });
+
+  site.nginxConfig = config;
+  writeJsonFile(SITES_FILE, sites);
+
+  if (IS_LINUX) {
+    const confPath = `/etc/nginx/sites-available/${site.domain}.conf`;
+    try {
+      fs.writeFileSync(confPath, config, 'utf8');
+      exec(`sudo nginx -t`, (err, stdout, stderr) => {
+        if (err) {
+          return res.status(400).json({ success: false, error: `Nginx Syntax Error: ${stderr || err.message}` });
+        }
+        exec(`sudo nginx -s reload`);
+        res.json({ success: true, message: 'Nginx config tested and reloaded successfully.' });
+      });
+      return;
+    } catch (e) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  }
+
+  res.json({ success: true, message: 'Nginx configuration saved.' });
+});
+
+// TOGGLE SSL (Let's Encrypt / HTTP redirect)
+app.post('/api/sites/:id/toggle-ssl', (req, res) => {
+  const { id } = req.params;
+  const site = sites.find(s => s.id === id);
+  if (!site) return res.status(404).json({ success: false, error: 'Site not found' });
+
+  site.ssl = !site.ssl;
+  site.nginxConfig = generateVhostConfig(site);
+  writeJsonFile(SITES_FILE, sites);
+
+  if (IS_LINUX) {
+    if (site.ssl) {
+      // Run certbot in background or apply SSL template
+      exec(`sudo certbot --nginx -d ${site.domain} --non-interactive --agree-tos -m admin@${site.domain} --redirect || sudo nginx -s reload`);
+    } else {
+      const confPath = `/etc/nginx/sites-available/${site.domain}.conf`;
+      fs.writeFileSync(confPath, site.nginxConfig, 'utf8');
+      exec(`sudo nginx -s reload`);
+    }
+  }
+
+  res.json({ success: true, site, ssl: site.ssl });
 });
 
 app.delete('/api/sites/:id', (req, res) => {
@@ -308,6 +430,11 @@ app.delete('/api/sites/:id', (req, res) => {
 
   const deletedSite = sites.splice(siteIndex, 1)[0];
   writeJsonFile(SITES_FILE, sites);
+
+  if (IS_LINUX) {
+    exec(`rm -f /etc/nginx/sites-available/${deletedSite.domain}.conf /etc/nginx/sites-enabled/${deletedSite.domain}.conf && sudo nginx -s reload`);
+  }
+
   res.json({ success: true, data: deletedSite });
 });
 

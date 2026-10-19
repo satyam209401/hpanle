@@ -47,6 +47,24 @@ export const api = {
     });
     return res.json();
   },
+  getSiteConfig: async (siteId) => {
+    const res = await fetch(`${API_BASE}/sites/${siteId}/config`);
+    return res.json();
+  },
+  saveSiteConfig: async (siteId, config) => {
+    const res = await fetch(`${API_BASE}/sites/${siteId}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config })
+    });
+    return res.json();
+  },
+  toggleSiteSSL: async (siteId) => {
+    const res = await fetch(`${API_BASE}/sites/${siteId}/toggle-ssl`, {
+      method: 'POST'
+    });
+    return res.json();
+  },
 
   // Files
   getFiles: async (targetPath = '') => {
